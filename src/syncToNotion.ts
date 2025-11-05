@@ -1,8 +1,29 @@
 import { Client } from "@notionhq/client";
-import { Product } from "./scrape.js";
+import type { Product } from "./scrape.js";
+import type { BlockObjectRequest } from "@notionhq/client/build/src/api-endpoints";
 
 const notion = new Client({ auth: process.env.NOTION_API_KEY });
 const DB_ID = process.env.NOTION_DB_ID!;
+
+type NotionError = {
+  message: string;
+  body?: unknown;
+};
+
+type RichTextItem = {
+  type: "text";
+  text: {
+    content: string;
+  };
+  annotations?: {
+    bold?: boolean;
+    italic?: boolean;
+    strikethrough?: boolean;
+    underline?: boolean;
+    code?: boolean;
+    color?: string;
+  };
+};
 
 /**
  * Notion 데이터베이스의 설명을 업데이트합니다.
@@ -35,12 +56,12 @@ export async function updateDatabaseDescription(newCount: number): Promise<void>
     });
 
     console.log(`📝 데이터베이스 설명 업데이트: ${description}`);
-  } catch (error: any) {
-    console.error("데이터베이스 설명 업데이트 오류:", error.message);
-    if (error.body) {
-      console.error("상세 오류:", JSON.stringify(error.body, null, 2));
+  } catch (error) {
+    const notionError = error as NotionError;
+    console.error("데이터베이스 설명 업데이트 오류:", notionError.message);
+    if (notionError.body) {
+      console.error("상세 오류:", JSON.stringify(notionError.body, null, 2));
     }
-    // 설명 업데이트 실패는 치명적이지 않으므로 에러를 throw하지 않음
   }
 }
 
@@ -64,14 +85,13 @@ export async function getExistingProductUrls(): Promise<Set<string>> {
       const response = await notion.databases.query({
         database_id: DB_ID,
         start_cursor: startCursor,
-        page_size: 100, // Notion API 최대 페이지 크기
+        page_size: 100,
       });
 
-      // 각 페이지의 URL 속성을 추출
       for (const page of response.results) {
         if ("properties" in page && page.properties.URL) {
           const urlProperty = page.properties.URL;
-          if (urlProperty.type === "url" && urlProperty.url) {
+          if (urlProperty.type === "url" && urlProperty.url && typeof urlProperty.url === "string") {
             existingUrls.add(urlProperty.url);
           }
         }
@@ -83,10 +103,11 @@ export async function getExistingProductUrls(): Promise<Set<string>> {
 
     console.log(`📋 Notion 데이터베이스에서 ${existingUrls.size}개의 기존 제품을 확인했습니다.`);
     return existingUrls;
-  } catch (error: any) {
-    console.error("Notion 데이터베이스 조회 오류:", error.message);
-    if (error.body) {
-      console.error("상세 오류:", JSON.stringify(error.body, null, 2));
+  } catch (error) {
+    const notionError = error as NotionError;
+    console.error("Notion 데이터베이스 조회 오류:", notionError.message);
+    if (notionError.body) {
+      console.error("상세 오류:", JSON.stringify(notionError.body, null, 2));
     }
     throw error;
   }
@@ -103,12 +124,12 @@ export async function syncToNotion(product: Product, analysis: string, translate
   try {
     const revenueNumber = parseFloat(product.revenue) || 0;
 
-    const properties: any = {
+    const properties = {
       Name: { title: [{ text: { content: product.name || "Untitled" } }] },
       Description: { rich_text: [{ text: { content: translatedDescription || "" } }] },
       Revenue: { number: revenueNumber },
       URL: { url: product.link },
-    };
+    } as unknown as Parameters<typeof notion.pages.create>[0]["properties"];
 
     if (product.thumbnail && product.thumbnail.trim() !== "" && product.thumbnail.startsWith("http")) {
       properties.Thumbnail = {
@@ -121,17 +142,14 @@ export async function syncToNotion(product: Product, analysis: string, translate
       };
     }
 
-    // Rich text 파싱 (볼드, 이탤릭 등)
-    const parseRichText = (text: string): any[] => {
-      const parts: any[] = [];
+    const parseRichText = (text: string): RichTextItem[] => {
+      const parts: RichTextItem[] = [];
       let currentIndex = 0;
 
-      // **text** 또는 __text__ 패턴 찾기
       const boldRegex = /(\*\*|__)(.+?)\1/g;
       let match;
 
       while ((match = boldRegex.exec(text)) !== null) {
-        // 볼드 앞의 일반 텍스트
         if (match.index > currentIndex) {
           const beforeText = text.substring(currentIndex, match.index);
           if (beforeText) {
@@ -139,7 +157,6 @@ export async function syncToNotion(product: Product, analysis: string, translate
           }
         }
 
-        // 볼드 텍스트
         parts.push({
           type: "text",
           text: { content: match[2] },
@@ -149,7 +166,6 @@ export async function syncToNotion(product: Product, analysis: string, translate
         currentIndex = match.index + match[0].length;
       }
 
-      // 남은 텍스트
       if (currentIndex < text.length) {
         const remainingText = text.substring(currentIndex);
         if (remainingText) {
@@ -157,18 +173,14 @@ export async function syncToNotion(product: Product, analysis: string, translate
         }
       }
 
-      // 볼드가 없는 경우 전체 텍스트 반환
       return parts.length > 0 ? parts : [{ type: "text", text: { content: text } }];
     };
 
-    // Analysis를 페이지 본문(children)에 추가
-    // 마크다운을 Notion 블록 형식으로 변환
-    const parseMarkdownToBlocks = (text: string): any[] => {
+    const parseMarkdownToBlocks = (text: string): BlockObjectRequest[] => {
       const lines = text.split("\n");
-      const blocks: any[] = [];
-      let currentBulletList: any[] = [];
-      let currentNumberedList: any[] = [];
-      let numberedCounter = 1;
+      const blocks: BlockObjectRequest[] = [];
+      let currentBulletList: BlockObjectRequest[] = [];
+      let currentNumberedList: BlockObjectRequest[] = [];
 
       const flushLists = () => {
         if (currentBulletList.length > 0) {
@@ -178,7 +190,6 @@ export async function syncToNotion(product: Product, analysis: string, translate
         if (currentNumberedList.length > 0) {
           blocks.push(...currentNumberedList);
           currentNumberedList = [];
-          numberedCounter = 1;
         }
       };
 
@@ -189,7 +200,6 @@ export async function syncToNotion(product: Product, analysis: string, translate
           continue;
         }
 
-        // 마크다운 헤딩 처리 (볼드 포함)
         if (trimmed.startsWith("####")) {
           flushLists();
           const headingText = trimmed.replace(/^####\s*/, "");
@@ -197,7 +207,8 @@ export async function syncToNotion(product: Product, analysis: string, translate
             object: "block",
             type: "heading_3",
             heading_3: {
-              rich_text: parseRichText(headingText),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rich_text: parseRichText(headingText) as unknown as any,
             },
           });
           continue;
@@ -209,7 +220,8 @@ export async function syncToNotion(product: Product, analysis: string, translate
             object: "block",
             type: "heading_3",
             heading_3: {
-              rich_text: parseRichText(headingText),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rich_text: parseRichText(headingText) as unknown as any,
             },
           });
           continue;
@@ -221,7 +233,8 @@ export async function syncToNotion(product: Product, analysis: string, translate
             object: "block",
             type: "heading_2",
             heading_2: {
-              rich_text: parseRichText(headingText),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rich_text: parseRichText(headingText) as unknown as any,
             },
           });
           continue;
@@ -233,26 +246,26 @@ export async function syncToNotion(product: Product, analysis: string, translate
             object: "block",
             type: "heading_1",
             heading_1: {
-              rich_text: parseRichText(headingText),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rich_text: parseRichText(headingText) as unknown as any,
             },
           });
           continue;
         }
 
-        // 이모지로 시작하는 제목 처리 (1️⃣, ✅, ❌ 등)
         if (/^[0-9]️⃣|^[✅❌]/.test(trimmed) && !trimmed.match(/^[-•*]\s/)) {
           flushLists();
           blocks.push({
             object: "block",
             type: "heading_2",
             heading_2: {
-              rich_text: parseRichText(trimmed),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rich_text: parseRichText(trimmed) as unknown as any,
             },
           });
           continue;
         }
 
-        // 구분선 처리 (---, ***, ___)
         if (/^[-*_]{3,}$/.test(trimmed)) {
           flushLists();
           blocks.push({
@@ -263,7 +276,6 @@ export async function syncToNotion(product: Product, analysis: string, translate
           continue;
         }
 
-        // 숫자 리스트 처리 (1. 2. 등)
         const numberedMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
         if (numberedMatch) {
           flushLists();
@@ -271,17 +283,15 @@ export async function syncToNotion(product: Product, analysis: string, translate
             object: "block",
             type: "numbered_list_item",
             numbered_list_item: {
-              rich_text: parseRichText(numberedMatch[2]),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rich_text: parseRichText(numberedMatch[2]) as unknown as any,
             },
           });
           continue;
         }
 
-        // 불릿 리스트 처리 (-, •, * 등)
-        // 단, 불릿 + 볼드만 있고 내용이 짧은 경우는 제목으로 처리
         if (/^[-•*]\s+/.test(trimmed)) {
           const content = trimmed.replace(/^[-•*]\s+/, "");
-          // 볼드 텍스트만 있고 물음표나 짧은 문장인 경우 제목으로 처리
           const isHeading =
             /^\*\*.*\*\*$/.test(content.trim()) ||
             (content.includes("?") && content.length < 100) ||
@@ -289,71 +299,75 @@ export async function syncToNotion(product: Product, analysis: string, translate
 
           if (isHeading) {
             flushLists();
-            // 볼드 마크다운 제거하고 제목으로 처리
             const headingText = content.replace(/\*\*/g, "").trim();
             blocks.push({
               object: "block",
               type: "heading_3",
               heading_3: {
-                rich_text: parseRichText(headingText),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                rich_text: parseRichText(headingText) as unknown as any,
               },
             });
             continue;
           }
 
-          // 일반 불릿 리스트
           flushLists();
           currentBulletList.push({
             object: "block",
             type: "bulleted_list_item",
             bulleted_list_item: {
-              rich_text: parseRichText(content),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              rich_text: parseRichText(content) as unknown as any,
             },
           });
           continue;
         }
 
-        // 들여쓰기된 리스트 (하위 항목) - 2칸 이상 들여쓰기
         const indentMatch = trimmed.match(/^(\s{2,})[-•*]\s+(.+)$/);
         if (indentMatch) {
           const content = indentMatch[2];
-          const indentLevel = indentMatch[1].length;
 
           if (currentBulletList.length > 0) {
-            // 마지막 항목에 자식 추가 (Notion은 중첩 리스트 지원)
             const lastItem = currentBulletList[currentBulletList.length - 1];
-            if (!lastItem.bulleted_list_item.children) {
-              lastItem.bulleted_list_item.children = [];
+            if (lastItem.type === "bulleted_list_item" && "bulleted_list_item" in lastItem) {
+              const bulletedItem = lastItem.bulleted_list_item as {
+                rich_text: RichTextItem[];
+                children?: BlockObjectRequest[];
+              };
+              if (!bulletedItem.children) {
+                bulletedItem.children = [];
+              }
+              bulletedItem.children.push({
+                object: "block",
+                type: "bulleted_list_item",
+                bulleted_list_item: {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  rich_text: parseRichText(content) as unknown as any,
+                },
+              } as BlockObjectRequest);
             }
-            lastItem.bulleted_list_item.children.push({
-              object: "block",
-              type: "bulleted_list_item",
-              bulleted_list_item: {
-                rich_text: parseRichText(content),
-              },
-            });
           } else {
-            // 부모 항목이 없으면 일반 불릿으로 처리
             flushLists();
             currentBulletList.push({
               object: "block",
               type: "bulleted_list_item",
               bulleted_list_item: {
-                rich_text: parseRichText(content),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                rich_text: parseRichText(content) as unknown as any,
               },
             });
           }
           continue;
         }
 
-        // 일반 텍스트 (볼드 처리 포함)
         flushLists();
         const richText = parseRichText(trimmed);
         blocks.push({
           object: "block",
           type: "paragraph",
           paragraph: {
-            rich_text: richText,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            rich_text: richText as unknown as any,
           },
         });
       }
@@ -380,10 +394,11 @@ export async function syncToNotion(product: Product, analysis: string, translate
               },
             ],
     });
-  } catch (error: any) {
-    console.error("Notion API 오류:", error.message);
-    if (error.body) {
-      console.error("상세 오류:", JSON.stringify(error.body, null, 2));
+  } catch (error) {
+    const notionError = error as NotionError;
+    console.error("Notion API 오류:", notionError.message);
+    if (notionError.body) {
+      console.error("상세 오류:", JSON.stringify(notionError.body, null, 2));
     }
     throw error;
   }
