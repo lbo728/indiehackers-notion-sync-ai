@@ -1,0 +1,21 @@
+name: IndieHackers → Notion Sync (AI Analysis)
+
+on:
+  schedule:
+    - cron: "0 1 * * *" # 매일 오전 10시 (KST)
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm start
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
