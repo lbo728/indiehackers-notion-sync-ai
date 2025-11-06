@@ -2,7 +2,7 @@ name: IndieHackers → Notion Sync (AI Analysis)
 
 on:
   schedule:
-    - cron: "0 1 * * *" # 매일 오전 10시 (KST)
+    - cron: "0 21 * * *" # 매일 오전 6시 (KST)
   workflow_dispatch:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm run fetch-stripe
+      - run: npm start
         env:
           NOTION_API_KEY: ${{ secrets.NOTION_TOKEN }}
           NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
