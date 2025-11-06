@@ -14,8 +14,9 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm start
+      - run: npm run fetch-stripe
         env:
           NOTION_API_KEY: ${{ secrets.NOTION_TOKEN }}
           NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
+          NOTION_DB_ID_2: ${{ secrets.NOTION_DB_ID_2 }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
