@@ -5,7 +5,9 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "test-stripe": "tsx src/test-stripe.ts",
-    "fetch-stripe": "tsx src/fetch-stripe-products.ts"
+    "fetch-stripe": "tsx src/fetch-stripe-products.ts",
+    "generate-report": "tsx src/generateReport.ts",
+    "test-single": "tsx src/test-single-product.ts"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.14",

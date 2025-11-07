@@ -16,7 +16,8 @@ jobs:
       - run: npm ci
       - run: npm start
         env:
-          NOTION_API_KEY: ${{ secrets.NOTION_TOKEN }}
+          CI: true
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
           NOTION_DB_ID_2: ${{ secrets.NOTION_DB_ID_2 }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

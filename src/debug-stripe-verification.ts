@@ -65,7 +65,7 @@ import puppeteer from "puppeteer";
 
     // 선택자 테스트
     const selectors = [
-      '[data-stripe-verified]',
+      "[data-stripe-verified]",
       '[data-verified="stripe"]',
       '[class*="stripe-verified"]',
       '[class*="verified-badge"]',
@@ -148,4 +148,3 @@ import puppeteer from "puppeteer";
 
   await browser.close();
 })();
-
